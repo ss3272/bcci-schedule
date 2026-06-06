@@ -1,0 +1,79 @@
+name: Daily BCCI Schedule Sync
+
+on:
+  # Runs at 7:00 AM IST (01:30 UTC) every day
+  schedule:
+    - cron: '30 1 * * *'
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      team:
+        description: 'Team to sync (men / women / both)'
+        required: false
+        default: 'both'
+
+permissions:
+  contents: write   # needed to commit updated JSON data files back
+
+jobs:
+  sync:
+    name: Sync BCCI Schedules & Update GitHub Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Initialize database
+        run: npm run setup
+        env:
+          NODE_ENV: production
+
+      - name: Run sync (scrape BCCI)
+        run: npm run sync
+        env:
+          NODE_ENV: production
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DISABLE_CRON: 'true'
+
+      - name: Export static JSON for GitHub Pages
+        run: npm run export
+        env:
+          NODE_ENV: production
+
+      - name: Commit updated data files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/
+          # Only commit if data files actually changed
+          if git diff --cached --quiet; then
+            echo "No data changes — skipping commit"
+          else
+            git commit -m "chore: daily schedule sync $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push origin main
+          fi
+
+      - name: Upload database artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cricket-db-${{ github.run_id }}
+          path: data/cricket.db
+          retention-days: 7
