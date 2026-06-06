@@ -2,10 +2,10 @@
  * Cricket schedule scraper.
  *
  * Source priority (each team):
- *  1. CricAPI (cricapi.com)   — free tier, works from any IP including GitHub Actions
- *  2. ESPN Cricinfo JSON API  — structured, blocked on cloud IPs
- *  3. Playwright on bcci.tv   — headless browser for JS-rendered page
- *  4. AI fallback             — Claude Haiku parses whatever HTML we got
+ *  1. AI Agent (Claude + tool use) — fetches and parses data intelligently
+ *  2. ESPN Cricinfo JSON API        — structured, no JS rendering needed
+ *  3. Playwright on bcci.tv         — headless browser for JS-rendered page
+ *  4. AI HTML fallback              — Claude Haiku parses whatever HTML we got
  */
 
 const fs = require('fs');
@@ -13,11 +13,11 @@ const path = require('path');
 const axios = require('axios');
 const { buildMatch, parseScheduleHtml } = require('./parser');
 const { extractMatchesFromHtml } = require('./ai-fallback');
+const { scrapeWithAiAgent } = require('./ai-agent-scraper');
 
 const SNAPSHOTS_DIR = path.join(__dirname, '../../snapshots');
 fs.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
 
-// ESPN Cricinfo team IDs
 const ESPN_TEAM_IDS = { men: 6, women: 289119 };
 
 const DELAY_MS = 2000;
@@ -40,148 +40,9 @@ function saveSnapshot(content, team, source) {
   } catch { return null; }
 }
 
-// ── CricAPI (cricapi.com) ─────────────────────────────────────────────────────
-
-function parseCricApiMatch(m, team) {
-  const name = m.name || '';
-  const teams = name.split(' vs ').map(s => s.trim());
-  const india = teams.find(t => /india/i.test(t)) || 'India';
-  const opponent = teams.find(t => !/india/i.test(t)) || '';
-
-  // Filter: women's team check
-  const isWomensMatch = /women/i.test(name) || /women/i.test(m.series || '');
-  if (team === 'women' && !isWomensMatch) return null;
-  if (team === 'men' && isWomensMatch) return null;
-
-  const dateStr = m.date || m.dateTimeGMT || '';
-  const dateUtc = dateStr ? new Date(dateStr).toISOString() : null;
-
-  const formatMap = { 'TEST': 'Test', 'ODI': 'ODI', 'T20I': 'T20I', 'T20': 'T20', 'IT20': 'T20I' };
-  const rawType = (m.matchType || '').toUpperCase();
-  const matchType = formatMap[rawType] || m.matchType || 'T20I';
-
-  let status = 'upcoming';
-  const statusText = m.status || '';
-  if (/won|lost|drew|tied|abandoned|no result/i.test(statusText)) status = 'completed';
-  else if (/live|progress|inning/i.test(statusText)) status = 'live';
-  else if (dateUtc && new Date(dateUtc) < new Date()) status = 'completed';
-
-  const venue = m.venue || '';
-  const seriesName = m.series || `India ${matchType} Series`;
-
-  return buildMatch({
-    series: seriesName,
-    teams: [india, opponent].filter(Boolean),
-    venue,
-    dateStr: dateStr,
-    matchType,
-    statusStr: status === 'completed' ? (statusText || 'Result') : status,
-    scoreHome: m.score?.[0] ? `${m.score[0].r}/${m.score[0].w}` : '',
-    scoreAway: m.score?.[1] ? `${m.score[1].r}/${m.score[1].w}` : '',
-    seriesId: String(m.id || ''),
-  });
-}
-
-async function tryCricApi(team) {
-  const key = process.env.CRICAPI_KEY;
-  if (!key) {
-    console.log('[Scraper] CRICAPI_KEY not set — skipping CricAPI');
-    return null;
-  }
-
-  const endpoints = [
-    `https://api.cricapi.com/v1/matches?apikey=${key}&offset=0`,
-    `https://api.cricapi.com/v1/cricScore?apikey=${key}`,
-  ];
-
-  for (const url of endpoints) {
-    try {
-      console.log(`[Scraper] Trying CricAPI: ${url.replace(key, 'REDACTED')}`);
-      const res = await axios.get(url, {
-        timeout: 15000,
-        headers: { ...AXIOS_HEADERS },
-      });
-      const data = res.data;
-
-      if (data?.status !== 'success' && data?.status !== 'ok' && !Array.isArray(data?.data)) {
-        console.log(`[Scraper] CricAPI response status: ${data?.status}`);
-        if (data?.status === 'failure') {
-          console.log(`[Scraper] CricAPI error: ${data?.reason || 'unknown'}`);
-          break; // Bad key — no point retrying other endpoint
-        }
-        continue;
-      }
-
-      const rawMatches = Array.isArray(data?.data) ? data.data : [];
-      const indiaMatches = rawMatches.filter(m => {
-        const name = (m.name || '').toLowerCase();
-        return name.includes('india');
-      });
-
-      if (indiaMatches.length > 0) {
-        const matches = indiaMatches
-          .map(m => parseCricApiMatch(m, team))
-          .filter(Boolean);
-
-        if (matches.length > 0) {
-          console.log(`[Scraper] CricAPI returned ${matches.length} India ${team} matches`);
-          return matches;
-        }
-      }
-
-      console.log(`[Scraper] CricAPI: no India matches found in ${rawMatches.length} total matches`);
-    } catch (err) {
-      console.log(`[Scraper] CricAPI endpoint failed: ${err.message}`);
-    }
-    await delay(1000);
-  }
-
-  // Try the upcoming/recent matches endpoint
-  try {
-    const seriesUrl = `https://api.cricapi.com/v1/series?apikey=${key}&offset=0`;
-    console.log(`[Scraper] Trying CricAPI series endpoint`);
-    const res = await axios.get(seriesUrl, { timeout: 15000, headers: AXIOS_HEADERS });
-    const data = res.data;
-
-    if (data?.status === 'success' && Array.isArray(data?.data)) {
-      const indiaSeries = data.data.filter(s => /india/i.test(s.name || ''));
-      if (indiaSeries.length > 0) {
-        const matches = [];
-        for (const series of indiaSeries.slice(0, 5)) {
-          const isWomens = /women/i.test(series.name || '');
-          if (team === 'women' && !isWomens) continue;
-          if (team === 'men' && isWomens) continue;
-
-          try {
-            const infoUrl = `https://api.cricapi.com/v1/series_info?apikey=${key}&id=${series.id}`;
-            const infoRes = await axios.get(infoUrl, { timeout: 10000, headers: AXIOS_HEADERS });
-            const info = infoRes.data;
-            if (info?.status === 'success' && Array.isArray(info?.data?.matchList)) {
-              for (const m of info.data.matchList) {
-                const parsed = parseCricApiMatch({ ...m, series: series.name }, team);
-                if (parsed) matches.push(parsed);
-              }
-            }
-          } catch {}
-          await delay(500);
-        }
-
-        if (matches.length > 0) {
-          console.log(`[Scraper] CricAPI series endpoint returned ${matches.length} matches`);
-          return matches;
-        }
-      }
-    }
-  } catch (err) {
-    console.log(`[Scraper] CricAPI series endpoint failed: ${err.message}`);
-  }
-
-  return null;
-}
-
 // ── ESPN Cricinfo JSON API ─────────────────────────────────────────────────────
 
-function parseEspnMatch(m, team) {
+function parseEspnMatch(m) {
   const teams = (m.teams || []).map(t => t.team?.longName || t.team?.abbreviation || '');
   const india = teams.find(t => /india/i.test(t)) || 'India';
   const opponent = teams.find(t => !/india/i.test(t)) || '';
@@ -189,7 +50,7 @@ function parseEspnMatch(m, team) {
   const startDate = m.startDate || m.match?.startDate;
   const dateUtc = startDate ? new Date(startDate).toISOString() : null;
 
-  const formatMap = { 'TEST': 'Test', 'ODI': 'ODI', 'T20I': 'T20I', 'T20': 'T20', 'IT20': 'T20I' };
+  const formatMap = { TEST: 'Test', ODI: 'ODI', T20I: 'T20I', T20: 'T20', IT20: 'T20I' };
   const matchFormat = m.matchFormat || m.international?.matchFormat || '';
   const matchType = formatMap[matchFormat.toUpperCase()] || matchFormat || 'T20I';
 
@@ -221,7 +82,6 @@ function parseEspnMatch(m, team) {
 
 async function tryEspnApi(team) {
   const teamId = ESPN_TEAM_IDS[team];
-
   const endpoints = [
     `https://hs-consumer-api.espncricinfo.com/v1/pages/team/schedule?lang=en&teamId=${teamId}`,
     `https://hs-consumer-api.espncricinfo.com/v1/pages/team/results?lang=en&teamId=${teamId}`,
@@ -235,7 +95,6 @@ async function tryEspnApi(team) {
         headers: { ...AXIOS_HEADERS, 'Referer': 'https://www.espncricinfo.com/' },
       });
       const data = res.data;
-
       const rawMatches =
         data?.content?.matches ||
         data?.content?.recentFixtures ||
@@ -246,7 +105,7 @@ async function tryEspnApi(team) {
 
       if (rawMatches.length > 0) {
         console.log(`[Scraper] ESPN API returned ${rawMatches.length} matches`);
-        return rawMatches.map(m => parseEspnMatch(m, team));
+        return rawMatches.map(m => parseEspnMatch(m));
       }
     } catch (err) {
       console.log(`[Scraper] ESPN API endpoint failed: ${err.message}`);
@@ -258,7 +117,7 @@ async function tryEspnApi(team) {
 
 // ── Playwright scraper ────────────────────────────────────────────────────────
 
-async function scrapeWithPlaywright(url, team) {
+async function scrapeWithPlaywright(url) {
   const playwright = require('playwright');
   const browser = await playwright.chromium.launch({
     headless: true,
@@ -319,14 +178,14 @@ async function scrapeSchedule(team = 'men') {
   let snapshotPath = null;
   let lastHtml = null;
 
-  // ── Step 1: CricAPI ──
+  // ── Step 1: AI Agent ──
   try {
-    const matches = await tryCricApi(team);
-    if (matches && matches.length > 0) {
-      return { matches, snapshotPath: null, source: 'cricapi', warning: null };
+    const result = await scrapeWithAiAgent(team);
+    if (result && result.matches.length > 0) {
+      return { matches: result.matches, snapshotPath: null, source: result.source, warning: null };
     }
   } catch (err) {
-    console.log(`[Scraper] CricAPI error: ${err.message}`);
+    console.log(`[Scraper] AI Agent error: ${err.message}`);
   }
 
   await delay(DELAY_MS);
@@ -346,7 +205,7 @@ async function scrapeSchedule(team = 'men') {
   // ── Step 3: Playwright on bcci.tv ──
   try {
     console.log(`[Scraper] Trying Playwright on bcci.tv for ${team}...`);
-    const result = await scrapeWithPlaywright(`https://www.bcci.tv/matches/schedule/${team}`, team);
+    const result = await scrapeWithPlaywright(`https://www.bcci.tv/matches/schedule/${team}`);
 
     if (result.type === 'json' && result.data.length > 0) {
       const matches = result.data.map(m => buildMatch({
@@ -376,9 +235,9 @@ async function scrapeSchedule(team = 'men') {
 
   await delay(DELAY_MS);
 
-  // ── Step 4: AI fallback (only when all structured sources failed) ──
+  // ── Step 4: AI HTML fallback (only when all structured sources failed) ──
   if (lastHtml && lastHtml.length > 500) {
-    console.log(`[Scraper] All parsers failed — activating AI fallback`);
+    console.log(`[Scraper] Activating AI HTML fallback`);
     try {
       const aiMatches = await extractMatchesFromHtml(lastHtml, team);
       if (aiMatches.length > 0) {
@@ -387,11 +246,11 @@ async function scrapeSchedule(team = 'men') {
           venue: m.venue, dateStr: m.match_date, matchType: m.match_type,
           statusStr: m.result || m.status,
         }));
-        console.log(`[Scraper] AI fallback extracted ${matches.length} matches`);
-        return { matches, snapshotPath, source: 'ai-fallback', warning: 'Used AI fallback parser' };
+        console.log(`[Scraper] AI HTML fallback extracted ${matches.length} matches`);
+        return { matches, snapshotPath, source: 'ai-html-fallback', warning: 'Used AI HTML fallback parser' };
       }
     } catch (err) {
-      console.log(`[Scraper] AI fallback error: ${err.message}`);
+      console.log(`[Scraper] AI HTML fallback error: ${err.message}`);
     }
   }
 
@@ -399,7 +258,7 @@ async function scrapeSchedule(team = 'men') {
     matches: [],
     snapshotPath,
     source: 'failed',
-    warning: 'All sources failed. Set these GitHub secrets: CRICAPI_KEY (get free key at cricapi.com), ANTHROPIC_API_KEY (for AI fallback).',
+    warning: 'All sources failed. Ensure ANTHROPIC_API_KEY is set as a GitHub secret.',
   };
 }
 
