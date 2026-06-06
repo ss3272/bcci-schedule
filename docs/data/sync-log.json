@@ -1,5 +1,32 @@
 {
   "success": true,
-  "count": 0,
-  "logs": []
+  "count": 2,
+  "logs": [
+    {
+      "id": 2,
+      "sync_type": "manual",
+      "team": "women",
+      "status": "failed",
+      "records_inserted": 0,
+      "records_updated": 0,
+      "records_total": 0,
+      "error_message": "No matches found — HTML structure may have changed. AI fallback recommended.",
+      "duration_ms": 17108,
+      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/women-axios-2026-06-06T01-12-03-828Z.html",
+      "synced_at": "2026-06-06 01:12:06"
+    },
+    {
+      "id": 1,
+      "sync_type": "manual",
+      "team": "men",
+      "status": "failed",
+      "records_inserted": 0,
+      "records_updated": 0,
+      "records_total": 0,
+      "error_message": "No matches found — HTML structure may have changed. AI fallback recommended.",
+      "duration_ms": 20008,
+      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/men-axios-2026-06-06T01-11-46-349Z.html",
+      "synced_at": "2026-06-06 01:11:49"
+    }
+  ]
 }
