@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>India Cricket Dashboard — BCCI Schedule</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏏</text></svg>" />
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <span class="brand-icon">🏏</span>
+        <div>
+          <h1 class="brand-title">India Cricket Dashboard</h1>
+          <p class="brand-sub">Live BCCI Schedule Tracker</p>
+        </div>
+      </div>
+      <div class="header-meta">
+        <div class="sync-info">
+          <span id="last-updated" class="last-updated">Loading...</span>
+          <div class="sync-actions">
+            <button id="sync-btn" class="btn btn-primary" onclick="triggerSync()">
+              <span class="btn-icon">↻</span> Sync Now
+            </button>
+          </div>
+        </div>
+        <div id="sync-status" class="sync-badge hidden"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Tab Navigation -->
+  <nav class="tab-nav">
+    <div class="tab-nav-inner">
+      <button class="tab-btn active" onclick="switchTab('men')" id="tab-men">
+        <span class="tab-flag">🇮🇳</span> Men's Team
+      </button>
+      <button class="tab-btn" onclick="switchTab('women')" id="tab-women">
+        <span class="tab-flag">🇮🇳</span> Women's Team
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main-content">
+
+    <!-- Men's Tab -->
+    <div id="panel-men" class="tab-panel active">
+      <div class="panel-header">
+        <h2>India Men's Cricket</h2>
+        <div class="panel-filters">
+          <button class="filter-btn active" onclick="filterMatches('men', 'all', this)">All</button>
+          <button class="filter-btn" onclick="filterMatches('men', 'upcoming', this)">Upcoming</button>
+          <button class="filter-btn" onclick="filterMatches('men', 'live', this)">Live</button>
+          <button class="filter-btn" onclick="filterMatches('men', 'completed', this)">Results</button>
+        </div>
+      </div>
+
+      <!-- Current Series -->
+      <section id="men-live-series" class="section-block hidden">
+        <h3 class="section-title live-indicator">🔴 Live / In Progress</h3>
+        <div id="men-live-matches" class="matches-grid"></div>
+      </section>
+
+      <!-- Upcoming -->
+      <section id="men-upcoming-section" class="section-block">
+        <h3 class="section-title">📅 Upcoming Matches</h3>
+        <div id="men-upcoming" class="matches-grid">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading schedule...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent Results -->
+      <section id="men-results-section" class="section-block">
+        <h3 class="section-title">📊 Recent Results</h3>
+        <div id="men-completed" class="matches-grid"></div>
+      </section>
+    </div>
+
+    <!-- Women's Tab -->
+    <div id="panel-women" class="tab-panel hidden">
+      <div class="panel-header">
+        <h2>India Women's Cricket</h2>
+        <div class="panel-filters">
+          <button class="filter-btn active" onclick="filterMatches('women', 'all', this)">All</button>
+          <button class="filter-btn" onclick="filterMatches('women', 'upcoming', this)">Upcoming</button>
+          <button class="filter-btn" onclick="filterMatches('women', 'live', this)">Live</button>
+          <button class="filter-btn" onclick="filterMatches('women', 'completed', this)">Results</button>
+        </div>
+      </div>
+
+      <section id="women-live-series" class="section-block hidden">
+        <h3 class="section-title live-indicator">🔴 Live / In Progress</h3>
+        <div id="women-live-matches" class="matches-grid"></div>
+      </section>
+
+      <section id="women-upcoming-section" class="section-block">
+        <h3 class="section-title">📅 Upcoming Matches</h3>
+        <div id="women-upcoming" class="matches-grid">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Loading schedule...</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="women-results-section" class="section-block">
+        <h3 class="section-title">📊 Recent Results</h3>
+        <div id="women-completed" class="matches-grid"></div>
+      </section>
+    </div>
+
+  </main>
+
+  <!-- Series Summary Modal -->
+  <div id="summary-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <button class="modal-close" onclick="closeSummaryModal()">✕</button>
+      <h3 id="modal-series-title" class="modal-title"></h3>
+      <div id="modal-content" class="modal-content">
+        <div class="loading-state"><div class="spinner"></div><p>Generating AI summary...</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync Log Modal -->
+  <div id="log-modal" class="modal-overlay hidden">
+    <div class="modal-box modal-wide">
+      <button class="modal-close" onclick="closeLogModal()">✕</button>
+      <h3 class="modal-title">Sync Log</h3>
+      <div id="log-content" class="modal-content log-table-wrap"></div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p>Data sourced from BCCI · Schedules in IST (UTC+5:30)</p>
+      <div class="footer-links">
+        <button class="link-btn" onclick="showSyncLog()">View Sync Log</button>
+        <span>·</span>
+        <a href="/api/health" target="_blank" class="link-btn">API Health</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

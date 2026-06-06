@@ -1,0 +1,33 @@
+{
+  "name": "bcci-schedule",
+  "version": "1.0.0",
+  "description": "India Cricket Dashboard — BCCI schedule tracker for Men's & Women's teams",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "sync": "node scripts/sync.js",
+    "setup": "node -e \"require('./src/db/db').getDb(); console.log('Database initialized');\"",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ss3272/bcci-schedule"
+  },
+  "keywords": ["cricket", "bcci", "india", "schedule", "dashboard"],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.101.0",
+    "axios": "^1.17.0",
+    "better-sqlite3": "^12.10.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1",
+    "playwright": "^1.60.0"
+  }
+}
