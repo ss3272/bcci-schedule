@@ -1,40 +1,5 @@
 {
   "success": true,
-  "logs": [
-    {
-      "id": 2,
-      "reason": "fallback_parser",
-      "model": "claude-haiku-4-5",
-      "prompt_tokens": 0,
-      "completion_tokens": 0,
-      "total_tokens": 0,
-      "team": "women",
-      "series_id": null,
-      "success": 0,
-      "error_message": "ANTHROPIC_API_KEY not set — AI fallback unavailable",
-      "called_at": "2026-06-06 01:12:06"
-    },
-    {
-      "id": 1,
-      "reason": "fallback_parser",
-      "model": "claude-haiku-4-5",
-      "prompt_tokens": 0,
-      "completion_tokens": 0,
-      "total_tokens": 0,
-      "team": "men",
-      "series_id": null,
-      "success": 0,
-      "error_message": "ANTHROPIC_API_KEY not set — AI fallback unavailable",
-      "called_at": "2026-06-06 01:11:48"
-    }
-  ],
-  "summary": [
-    {
-      "total_calls": 2,
-      "total_tokens_used": 0,
-      "successful_calls": 0,
-      "reason": "fallback_parser",
-      "date": "2026-06-06"
-    }
-  ]
+  "logs": [],
+  "summary": []
 }
