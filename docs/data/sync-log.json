@@ -10,10 +10,10 @@
       "records_inserted": 0,
       "records_updated": 0,
       "records_total": 0,
-      "error_message": "All sources failed — check snapshots/ for debug HTML. Set ANTHROPIC_API_KEY to enable AI fallback.",
-      "duration_ms": 12773,
+      "error_message": "All sources failed. Ensure ANTHROPIC_API_KEY is set as a GitHub secret.",
+      "duration_ms": 11835,
       "snapshot_path": null,
-      "synced_at": "2026-06-06 01:20:38"
+      "synced_at": "2026-06-06 05:14:35"
     },
     {
       "id": 1,
@@ -23,10 +23,10 @@
       "records_inserted": 0,
       "records_updated": 0,
       "records_total": 0,
-      "error_message": "All sources failed — check snapshots/ for debug HTML. Set ANTHROPIC_API_KEY to enable AI fallback.",
-      "duration_ms": 13461,
+      "error_message": "All sources failed. Ensure ANTHROPIC_API_KEY is set as a GitHub secret.",
+      "duration_ms": 12921,
       "snapshot_path": null,
-      "synced_at": "2026-06-06 01:20:25"
+      "synced_at": "2026-06-06 05:14:23"
     }
   ]
 }
