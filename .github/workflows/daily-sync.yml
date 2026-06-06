@@ -13,9 +13,12 @@ on:
         required: false
         default: 'both'
 
+permissions:
+  contents: write   # needed to commit updated JSON data files back
+
 jobs:
   sync:
-    name: Sync BCCI Schedules
+    name: Sync BCCI Schedules & Update GitHub Pages
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -42,12 +45,30 @@ jobs:
         env:
           NODE_ENV: production
 
-      - name: Run sync
+      - name: Run sync (scrape BCCI)
         run: npm run sync
         env:
           NODE_ENV: production
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           DISABLE_CRON: 'true'
+
+      - name: Export static JSON for GitHub Pages
+        run: npm run export
+        env:
+          NODE_ENV: production
+
+      - name: Commit updated data files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/
+          # Only commit if data files actually changed
+          if git diff --cached --quiet; then
+            echo "No data changes — skipping commit"
+          else
+            git commit -m "chore: daily schedule sync $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push origin main
+          fi
 
       - name: Upload database artifact
         uses: actions/upload-artifact@v4
@@ -56,12 +77,3 @@ jobs:
           name: cricket-db-${{ github.run_id }}
           path: data/cricket.db
           retention-days: 7
-
-      - name: Upload snapshots
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: html-snapshots-${{ github.run_id }}
-          path: snapshots/
-          retention-days: 3
-          if-no-files-found: ignore
