@@ -1,264 +1,328 @@
 /**
- * BCCI schedule scraper.
- * Primary: Playwright (headless Chromium) for JS-rendered pages.
- * Fallback: Axios + Cheerio for static HTML.
- * AI fallback: Claude Haiku when both fail or return empty data.
+ * Cricket schedule scraper.
+ *
+ * Source priority (each team):
+ *  1. ESPN Cricinfo JSON API  — structured, no JS rendering needed
+ *  2. CricBuzz API            — structured JSON fallback
+ *  3. Playwright on bcci.tv   — headless browser for JS-rendered page
+ *  4. AI fallback             — Claude Haiku parses whatever HTML we got
  */
 
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const { parseScheduleHtml } = require('./parser');
-const { extractMatchesFromHtml, categorizeSeries } = require('./ai-fallback');
+const { buildMatch, parseScheduleHtml } = require('./parser');
+const { extractMatchesFromHtml } = require('./ai-fallback');
 
 const SNAPSHOTS_DIR = path.join(__dirname, '../../snapshots');
 fs.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
 
-const BCCI_URLS = {
-  men: 'https://www.bcci.tv/matches/schedule/men',
-  women: 'https://www.bcci.tv/matches/schedule/women',
+// ESPN Cricinfo team IDs
+const ESPN_TEAM_IDS = { men: 6, women: 289119 };
+
+const DELAY_MS = 2000;
+const AXIOS_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'application/json, text/html, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
 };
 
-// ESPN Cricinfo fallback
-const ESPN_URLS = {
-  men: 'https://www.espncricinfo.com/cricket-schedule/international/india',
-  women: 'https://www.espncricinfo.com/cricket-schedule/international/india/women',
-};
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-const DELAY_MS = 2500; // Respectful delay between requests
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function saveSnapshot(html, team, source) {
+function saveSnapshot(content, team, source) {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const filename = `${team}-${source}-${ts}.html`;
-  const fullPath = path.join(SNAPSHOTS_DIR, filename);
+  const ext = typeof content === 'object' ? 'json' : 'html';
+  const filename = `${team}-${source}-${ts}.${ext}`;
   try {
-    fs.writeFileSync(fullPath, html, 'utf8');
-    return fullPath;
-  } catch {
-    return null;
-  }
+    const data = typeof content === 'object' ? JSON.stringify(content, null, 2) : content;
+    fs.writeFileSync(path.join(SNAPSHOTS_DIR, filename), data, 'utf8');
+    return path.join(SNAPSHOTS_DIR, filename);
+  } catch { return null; }
 }
 
-// ── Playwright scraper ────────────────────────────────────────────────────────
+// ── ESPN Cricinfo JSON API ─────────────────────────────────────────────────────
 
-async function scrapeWithPlaywright(url, team) {
-  let playwright;
-  try {
-    playwright = require('playwright');
-  } catch {
-    throw new Error('Playwright not installed');
-  }
+function parseEspnMatch(m, team) {
+  const teams = (m.teams || []).map(t => t.team?.longName || t.team?.abbreviation || '');
+  const india = teams.find(t => /india/i.test(t)) || 'India';
+  const opponent = teams.find(t => !/india/i.test(t)) || '';
 
-  const browser = await playwright.chromium.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-    ],
+  const startDate = m.startDate || m.match?.startDate;
+  const dateUtc = startDate ? new Date(startDate).toISOString() : null;
+
+  const formatMap = { 'TEST': 'Test', 'ODI': 'ODI', 'T20I': 'T20I', 'T20': 'T20', 'IT20': 'T20I' };
+  const matchFormat = m.matchFormat || m.international?.matchFormat || '';
+  const matchType = formatMap[matchFormat.toUpperCase()] || matchFormat || 'T20I';
+
+  const statusText = m.statusText || m.match?.statusText || '';
+  let status = 'upcoming';
+  if (/result|won|drew|tied|abandoned/i.test(statusText)) status = 'completed';
+  else if (/live|progress|stumps/i.test(statusText)) status = 'live';
+  else if (dateUtc && new Date(dateUtc) < new Date()) status = 'completed';
+
+  const venue = m.ground?.longName || m.ground?.name || '';
+  const city = m.ground?.city?.name || m.ground?.town?.name || '';
+  const seriesName = m.series?.longName || m.series?.name || `India ${matchType} Series`;
+  const seriesId = String(m.series?.objectId || m.series?.id || '');
+
+  return buildMatch({
+    series: seriesName,
+    teams: [india, opponent].filter(Boolean),
+    venue: [venue, city].filter(Boolean).join(', '),
+    dateStr: startDate || '',
+    matchType,
+    statusStr: status === 'completed' ? (statusText || 'Result') : status,
+    scoreHome: m.teams?.[0]?.score?.[0]?.runs != null
+      ? `${m.teams[0].score[0].runs}/${m.teams[0].score[0].wickets}` : '',
+    scoreAway: m.teams?.[1]?.score?.[0]?.runs != null
+      ? `${m.teams[1].score[0].runs}/${m.teams[1].score[0].wickets}` : '',
+    seriesId,
   });
-
-  try {
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    });
-
-    const page = await context.newPage();
-
-    // Block images, fonts, and trackers to speed up loading
-    await page.route('**/*', route => {
-      const rt = route.request().resourceType();
-      if (['image', 'font', 'media', 'stylesheet'].includes(rt)) {
-        return route.abort();
-      }
-      return route.continue();
-    });
-
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-
-    // Wait for content to render
-    await page.waitForTimeout(2000);
-
-    // Try to wait for schedule-specific elements
-    try {
-      await page.waitForSelector('[class*="match"], [class*="fixture"], [class*="schedule"]', { timeout: 5000 });
-    } catch {
-      // Continue even if selector not found
-    }
-
-    const html = await page.content();
-    return html;
-  } finally {
-    await browser.close();
-  }
 }
 
-// ── Axios fallback scraper ────────────────────────────────────────────────────
+async function tryEspnApi(team) {
+  const teamId = ESPN_TEAM_IDS[team];
 
-async function scrapeWithAxios(url) {
-  const response = await axios.get(url, {
-    timeout: 20000,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5',
-      'Accept-Encoding': 'gzip, deflate',
-      'Connection': 'keep-alive',
-    },
-    maxRedirects: 5,
-  });
-  return response.data;
-}
-
-// ── BCCI API endpoint probe ────────────────────────────────────────────────────
-
-async function tryBcciApi(team) {
   const endpoints = [
-    `https://www.bcci.tv/api/schedule/${team}`,
-    `https://www.bcci.tv/api/matches/${team}/schedule`,
-    `https://api.bcci.tv/schedule/${team}`,
+    `https://hs-consumer-api.espncricinfo.com/v1/pages/team/schedule?lang=en&teamId=${teamId}`,
+    `https://hs-consumer-api.espncricinfo.com/v1/pages/team/results?lang=en&teamId=${teamId}`,
   ];
 
-  for (const endpoint of endpoints) {
+  for (const url of endpoints) {
     try {
-      const res = await axios.get(endpoint, {
-        timeout: 8000,
-        headers: { 'Accept': 'application/json' },
+      console.log(`[Scraper] Trying ESPN API: ${url}`);
+      const res = await axios.get(url, {
+        timeout: 15000,
+        headers: { ...AXIOS_HEADERS, 'Referer': 'https://www.espncricinfo.com/' },
       });
-      if (res.data && typeof res.data === 'object') {
-        return res.data;
+      const data = res.data;
+
+      const rawMatches =
+        data?.content?.matches ||
+        data?.content?.recentFixtures ||
+        data?.content?.upcomingFixtures ||
+        data?.fixtures ||
+        data?.matches ||
+        [];
+
+      if (rawMatches.length > 0) {
+        console.log(`[Scraper] ESPN API returned ${rawMatches.length} matches`);
+        return rawMatches.map(m => parseEspnMatch(m, team));
       }
-    } catch {
-      // Try next endpoint
+    } catch (err) {
+      console.log(`[Scraper] ESPN API endpoint failed: ${err.message}`);
+    }
+    await delay(1000);
+  }
+  return null;
+}
+
+// ── CricBuzz API ──────────────────────────────────────────────────────────────
+
+async function tryCricbuzzApi(team) {
+  const seriesType = team === 'women' ? 'women' : 'international';
+  const endpoints = [
+    `https://cricbuzz-cricket.p.rapidapi.com/matches/v1/${seriesType}`,
+    `https://www.cricbuzz.com/cricket-schedule/upcoming-series/${seriesType}`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      console.log(`[Scraper] Trying CricBuzz: ${url}`);
+      const res = await axios.get(url, { timeout: 12000, headers: AXIOS_HEADERS });
+      if (res.data) {
+        const scheduleItems = res.data?.matchScheduleMap || res.data?.scheduleMap || [];
+        const matches = [];
+
+        for (const item of scheduleItems) {
+          const seriesMatches = item?.scheduleAdWrapper?.matchScheduleList || [];
+          for (const sm of seriesMatches) {
+            const seriesName = sm?.seriesName || '';
+            for (const m of (sm?.matchInfo || [])) {
+              const team1 = m?.team1?.teamName || '';
+              const team2 = m?.team2?.teamName || '';
+              if (!/india/i.test(team1) && !/india/i.test(team2)) continue;
+              if (team === 'women' && !/women/i.test(seriesName) && !/women/i.test(team1)) continue;
+              if (team === 'men' && /women/i.test(seriesName)) continue;
+
+              const dateMs = m?.startDate ? parseInt(m.startDate) : null;
+              matches.push(buildMatch({
+                series: seriesName,
+                teams: [team1, team2].filter(Boolean),
+                venue: m?.venueInfo?.ground || '',
+                dateStr: dateMs ? new Date(dateMs).toISOString() : '',
+                matchType: m?.matchFormat || 'T20I',
+                statusStr: m?.status || 'upcoming',
+              }));
+            }
+          }
+        }
+        if (matches.length > 0) {
+          console.log(`[Scraper] CricBuzz returned ${matches.length} India matches`);
+          return matches;
+        }
+      }
+    } catch (err) {
+      console.log(`[Scraper] CricBuzz failed: ${err.message}`);
     }
   }
   return null;
 }
 
-// ── Main scrape function ──────────────────────────────────────────────────────
+// ── Playwright scraper ────────────────────────────────────────────────────────
 
-/**
- * Scrapes the BCCI schedule for the given team.
- * Returns { matches, snapshotPath, source, warning }
- */
-async function scrapeSchedule(team = 'men') {
-  const url = BCCI_URLS[team];
-  let html = null;
-  let source = 'unknown';
-  let snapshotPath = null;
-  let warning = null;
-
-  console.log(`[Scraper] Starting scrape for ${team}'s team from ${url}`);
-
-  // Step 1: Try BCCI JSON API first (fast and structured)
+async function scrapeWithPlaywright(url, team) {
+  const playwright = require('playwright');
+  const browser = await playwright.chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+  });
   try {
-    const apiData = await tryBcciApi(team);
-    if (apiData && apiData.matches?.length > 0) {
-      const { parseScheduleJson } = require('./parser');
-      const matches = parseScheduleJson(apiData);
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 800 },
+      locale: 'en-US',
+    });
+    const page = await context.newPage();
+
+    // Intercept XHR/fetch calls to capture API responses directly
+    const apiResponses = [];
+    page.on('response', async response => {
+      const resUrl = response.url();
+      if (resUrl.includes('/api/') || resUrl.includes('schedule') || resUrl.includes('match')) {
+        try {
+          const ct = response.headers()['content-type'] || '';
+          if (ct.includes('json')) {
+            const json = await response.json().catch(() => null);
+            if (json) apiResponses.push({ url: resUrl, json });
+          }
+        } catch {}
+      }
+    });
+
+    await page.route('**/*', route => {
+      const rt = route.request().resourceType();
+      if (['image', 'font', 'media'].includes(rt)) return route.abort();
+      return route.continue();
+    });
+
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 35000 });
+    await page.waitForTimeout(3000);
+
+    // Check if we intercepted any API responses with match data
+    for (const { url: apiUrl, json } of apiResponses) {
+      const matches =
+        json?.matches || json?.data?.matches || json?.schedule?.matches ||
+        json?.fixtures || json?.data?.fixtures || [];
       if (matches.length > 0) {
-        console.log(`[Scraper] BCCI API returned ${matches.length} matches for ${team}`);
-        return { matches, snapshotPath: null, source: 'bcci-api', warning: null };
+        console.log(`[Scraper] Playwright intercepted API at ${apiUrl} with ${matches.length} matches`);
+        return { type: 'json', data: matches };
       }
     }
+
+    const html = await page.content();
+    return { type: 'html', data: html };
+  } finally {
+    await browser.close();
+  }
+}
+
+// ── Main scrape function ──────────────────────────────────────────────────────
+
+async function scrapeSchedule(team = 'men') {
+  console.log(`[Scraper] Starting scrape for ${team}'s team`);
+  let snapshotPath = null;
+  let lastHtml = null;
+
+  // ── Step 1: ESPN Cricinfo JSON API ──
+  try {
+    const matches = await tryEspnApi(team);
+    if (matches && matches.length > 0) {
+      return { matches, snapshotPath: null, source: 'espn-api', warning: null };
+    }
   } catch (err) {
-    console.log(`[Scraper] BCCI API not available: ${err.message}`);
+    console.log(`[Scraper] ESPN API error: ${err.message}`);
   }
 
-  // Step 2: Try Playwright (handles JS-rendered content)
+  await delay(DELAY_MS);
+
+  // ── Step 2: CricBuzz API ──
   try {
-    console.log(`[Scraper] Trying Playwright for ${team}...`);
-    html = await scrapeWithPlaywright(url, team);
-    source = 'playwright-bcci';
-    snapshotPath = saveSnapshot(html, team, 'playwright');
-    console.log(`[Scraper] Playwright fetched ${html.length} bytes`);
+    const matches = await tryCricbuzzApi(team);
+    if (matches && matches.length > 0) {
+      return { matches, snapshotPath: null, source: 'cricbuzz-api', warning: null };
+    }
+  } catch (err) {
+    console.log(`[Scraper] CricBuzz error: ${err.message}`);
+  }
+
+  await delay(DELAY_MS);
+
+  // ── Step 3: Playwright on bcci.tv (intercepts XHR + renders page) ──
+  try {
+    console.log(`[Scraper] Trying Playwright on bcci.tv for ${team}...`);
+    const result = await scrapeWithPlaywright(`https://www.bcci.tv/matches/schedule/${team}`, team);
+
+    if (result.type === 'json' && result.data.length > 0) {
+      const matches = result.data.map(m => buildMatch({
+        series: m.series?.name || m.seriesName || 'India Series',
+        teams: [m.teams?.[0]?.name, m.teams?.[1]?.name].filter(Boolean),
+        venue: m.venue?.name || '',
+        dateStr: m.startDateTime || m.matchDate || '',
+        matchType: m.matchFormat || m.type || 'T20I',
+        statusStr: m.status || m.result || '',
+      }));
+      return { matches, snapshotPath: null, source: 'playwright-bcci-api', warning: null };
+    }
+
+    if (result.type === 'html' && result.data.length > 500) {
+      lastHtml = result.data;
+      snapshotPath = saveSnapshot(lastHtml, team, 'playwright');
+      console.log(`[Scraper] Playwright HTML: ${lastHtml.length} bytes`);
+
+      const parsed = parseScheduleHtml(lastHtml, team);
+      if (parsed.matches.length > 0) {
+        return { matches: parsed.matches, snapshotPath, source: 'playwright-bcci-html', warning: null };
+      }
+    }
   } catch (err) {
     console.log(`[Scraper] Playwright failed: ${err.message}`);
   }
 
   await delay(DELAY_MS);
 
-  // Step 3: Axios fallback if Playwright failed or returned short HTML
-  if (!html || html.length < 1000) {
+  // ── Step 4: AI fallback (only when all structured sources failed) ──
+  if (lastHtml && lastHtml.length > 500) {
+    console.log(`[Scraper] All parsers failed — activating AI fallback`);
     try {
-      console.log(`[Scraper] Trying Axios for ${team}...`);
-      html = await scrapeWithAxios(url);
-      source = 'axios-bcci';
-      snapshotPath = saveSnapshot(html, team, 'axios');
-      console.log(`[Scraper] Axios fetched ${html.length} bytes`);
+      const aiMatches = await extractMatchesFromHtml(lastHtml, team);
+      if (aiMatches.length > 0) {
+        const matches = aiMatches.map(m => buildMatch({
+          series: m.series_name, teams: [m.team_home, m.team_away].filter(Boolean),
+          venue: m.venue, dateStr: m.match_date, matchType: m.match_type,
+          statusStr: m.result || m.status,
+        }));
+        console.log(`[Scraper] AI fallback extracted ${matches.length} matches`);
+        return { matches, snapshotPath, source: 'ai-fallback', warning: 'Used AI fallback parser' };
+      }
     } catch (err) {
-      console.log(`[Scraper] Axios BCCI failed: ${err.message}`);
-    }
-  }
-
-  await delay(DELAY_MS);
-
-  // Step 4: Try ESPN Cricinfo if BCCI is blocked
-  if (!html || html.length < 1000) {
-    try {
-      console.log(`[Scraper] Trying ESPN Cricinfo fallback for ${team}...`);
-      html = await scrapeWithAxios(ESPN_URLS[team]);
-      source = 'espn-cricinfo';
-      snapshotPath = saveSnapshot(html, team, 'espn');
-      console.log(`[Scraper] ESPN fetched ${html.length} bytes`);
-    } catch (err) {
-      console.log(`[Scraper] ESPN fallback failed: ${err.message}`);
-      warning = 'Both BCCI and ESPN scraping failed';
-    }
-  }
-
-  if (!html) {
-    console.log(`[Scraper] All HTTP sources failed for ${team}`);
-    return { matches: [], snapshotPath: null, source: 'failed', warning: 'All sources failed' };
-  }
-
-  // Step 5: Parse the HTML
-  const parseResult = parseScheduleHtml(html, team);
-  console.log(`[Scraper] Parser (${parseResult.strategy}) found ${parseResult.matches.length} matches`);
-
-  // Step 6: AI fallback if parser returned nothing (keeps costs minimal)
-  if (parseResult.matches.length === 0 && parseResult.warning) {
-    console.log(`[Scraper] Parser empty — activating AI fallback`);
-    const aiMatches = await extractMatchesFromHtml(html, team);
-    if (aiMatches.length > 0) {
-      const { buildMatch } = require('./parser');
-      const matches = aiMatches.map(m => buildMatch({
-        series: m.series_name,
-        teams: [m.team_home, m.team_away].filter(Boolean),
-        venue: m.venue,
-        dateStr: m.match_date,
-        matchType: m.match_type,
-        statusStr: m.result || m.status,
-      }));
-      console.log(`[Scraper] AI fallback extracted ${matches.length} matches`);
-      return { matches, snapshotPath, source: source + '+ai', warning: parseResult.warning };
+      console.log(`[Scraper] AI fallback error: ${err.message}`);
     }
   }
 
   return {
-    matches: parseResult.matches,
+    matches: [],
     snapshotPath,
-    source,
-    warning: warning || parseResult.warning,
+    source: 'failed',
+    warning: 'All sources failed — check snapshots/ for debug HTML. Set ANTHROPIC_API_KEY to enable AI fallback.',
   };
 }
 
-/**
- * Scrape both teams with a delay between requests.
- */
 async function scrapeAll() {
-  const results = {};
-
-  results.men = await scrapeSchedule('men');
+  const men = await scrapeSchedule('men');
   await delay(DELAY_MS);
-  results.women = await scrapeSchedule('women');
-
-  return results;
+  const women = await scrapeSchedule('women');
+  return { men, women };
 }
 
 module.exports = { scrapeSchedule, scrapeAll };
