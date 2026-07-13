@@ -11,9 +11,9 @@
       "records_updated": 0,
       "records_total": 0,
       "error_message": "All sources failed. Ensure ANTHROPIC_API_KEY is set as a GitHub secret.",
-      "duration_ms": 11860,
+      "duration_ms": 11720,
       "snapshot_path": null,
-      "synced_at": "2026-07-12 04:53:24"
+      "synced_at": "2026-07-13 05:00:26"
     },
     {
       "id": 1,
@@ -24,9 +24,9 @@
       "records_updated": 0,
       "records_total": 0,
       "error_message": "All sources failed. Ensure ANTHROPIC_API_KEY is set as a GitHub secret.",
-      "duration_ms": 13891,
+      "duration_ms": 12671,
       "snapshot_path": null,
-      "synced_at": "2026-07-12 04:53:12"
+      "synced_at": "2026-07-13 05:00:14"
     }
   ]
 }
