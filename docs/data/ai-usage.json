@@ -12,7 +12,7 @@
       "series_id": null,
       "success": 0,
       "error_message": "ANTHROPIC_API_KEY not set — AI fallback unavailable",
-      "called_at": "2026-07-31 04:59:29"
+      "called_at": "2026-08-01 04:51:57"
     },
     {
       "id": 1,
@@ -25,7 +25,7 @@
       "series_id": null,
       "success": 0,
       "error_message": "ANTHROPIC_API_KEY not set — AI fallback unavailable",
-      "called_at": "2026-07-31 04:59:15"
+      "called_at": "2026-08-01 04:51:43"
     }
   ],
   "summary": [
@@ -34,7 +34,7 @@
       "total_tokens_used": 0,
       "successful_calls": 0,
       "reason": "fallback_parser",
-      "date": "2026-07-31"
+      "date": "2026-08-01"
     }
   ]
 }
