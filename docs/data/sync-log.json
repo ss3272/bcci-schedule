@@ -11,9 +11,9 @@
       "records_updated": 0,
       "records_total": 0,
       "error_message": "All sources failed. Ensure ANTHROPIC_API_KEY is set as a GitHub secret.",
-      "duration_ms": 14263,
-      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/women-playwright-2026-08-17T02-42-22-298Z.html",
-      "synced_at": "2026-08-17 02:42:24"
+      "duration_ms": 14308,
+      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/women-playwright-2026-08-18T02-38-45-831Z.html",
+      "synced_at": "2026-08-18 02:38:47"
     },
     {
       "id": 1,
@@ -24,9 +24,9 @@
       "records_updated": 0,
       "records_total": 0,
       "error_message": "All sources failed. Ensure ANTHROPIC_API_KEY is set as a GitHub secret.",
-      "duration_ms": 15401,
-      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/men-playwright-2026-08-17T02-42-08-026Z.html",
-      "synced_at": "2026-08-17 02:42:10"
+      "duration_ms": 15327,
+      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/men-playwright-2026-08-18T02-38-31-508Z.html",
+      "synced_at": "2026-08-18 02:38:33"
     }
   ]
 }
