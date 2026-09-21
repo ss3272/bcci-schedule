@@ -11,9 +11,9 @@
       "records_updated": 0,
       "records_total": 2,
       "error_message": null,
-      "duration_ms": 11742,
-      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/women-playwright-2026-09-20T06-41-43-018Z.html",
-      "synced_at": "2026-09-20 06:41:43"
+      "duration_ms": 11991,
+      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/women-playwright-2026-09-21T06-47-46-942Z.html",
+      "synced_at": "2026-09-21 06:47:46"
     },
     {
       "id": 1,
@@ -24,9 +24,9 @@
       "records_updated": 0,
       "records_total": 2,
       "error_message": null,
-      "duration_ms": 13349,
-      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/men-playwright-2026-09-20T06-41-31-266Z.html",
-      "synced_at": "2026-09-20 06:41:31"
+      "duration_ms": 13514,
+      "snapshot_path": "/home/runner/work/bcci-schedule/bcci-schedule/snapshots/men-playwright-2026-09-21T06-47-34-939Z.html",
+      "synced_at": "2026-09-21 06:47:34"
     }
   ]
 }
